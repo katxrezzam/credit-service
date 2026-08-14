@@ -7,6 +7,7 @@ import com.bootcamp.creditservice.dto.PaymentRequest;
 import com.bootcamp.creditservice.dto.PaymentResponse;
 import com.bootcamp.creditservice.service.CreditService;
 import jakarta.validation.Valid;
+import java.time.Instant;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
@@ -39,8 +41,9 @@ public class CreditController {
     }
 
     @GetMapping
-    public Flux<CreditResponse> findAll() {
-        return creditService.findAll();
+    public Flux<CreditResponse> findAll(
+            @RequestParam(required = false) String customerId) {
+        return creditService.findAll(customerId);
     }
 
     @GetMapping("/{id}")
@@ -61,8 +64,11 @@ public class CreditController {
     }
 
     @GetMapping("/{id}/payments")
-    public Flux<PaymentResponse> findPayments(@PathVariable String id) {
-        return creditService.findPayments(id);
+    public Flux<PaymentResponse> findPayments(
+            @PathVariable String id,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to) {
+        return creditService.findPayments(id, from, to);
     }
 
     @PostMapping("/{id}/payments")

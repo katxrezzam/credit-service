@@ -65,7 +65,8 @@ class CreditControllerTest {
 
     @Test
     void getAll_retorna200() {
-        when(creditService.findAll()).thenReturn(reactor.core.publisher.Flux.just(sampleResponse()));
+        when(creditService.findAll(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(reactor.core.publisher.Flux.just(sampleResponse()));
 
         webTestClient.get().uri("/credits")
                 .exchange()

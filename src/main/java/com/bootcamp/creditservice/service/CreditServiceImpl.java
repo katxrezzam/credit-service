@@ -76,8 +76,11 @@ public class CreditServiceImpl implements CreditService {
     }
 
     @Override
-    public Flux<CreditResponse> findAll() {
-        return creditRepository.findAll().map(CreditMapper::toResponse);
+    public Flux<CreditResponse> findAll(String customerId) {
+        Flux<Credit> credits = customerId == null || customerId.isBlank()
+                ? creditRepository.findAll()
+                : creditRepository.findByCustomerId(customerId);
+        return credits.map(CreditMapper::toResponse);
     }
 
     @Override
@@ -124,9 +127,14 @@ public class CreditServiceImpl implements CreditService {
     }
 
     @Override
-    public Flux<PaymentResponse> findPayments(String creditId) {
+    public Flux<PaymentResponse> findPayments(String creditId, Instant from, Instant to) {
         return findEntityById(creditId)
-                .flatMapMany(credit -> paymentRepository.findByCreditId(creditId))
+                .flatMapMany(credit -> from == null && to == null
+                        ? paymentRepository.findByCreditId(creditId)
+                        : paymentRepository.findByCreditIdAndTimestampBetween(
+                                creditId,
+                                from != null ? from : Instant.EPOCH,
+                                to != null ? to : Instant.now()))
                 .map(PaymentMapper::toResponse);
     }
 

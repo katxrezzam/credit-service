@@ -274,4 +274,51 @@ class CreditServiceImplTest {
                 .expectError(InvalidBusinessRuleException.class)
                 .verify();
     }
+
+    // ---------- findAll / findPayments (report-service) ----------
+
+    @Test
+    void findAll_sinCustomerId_devuelveTodos() {
+        when(creditRepository.findAll())
+                .thenReturn(reactor.core.publisher.Flux.just(activeCreditWithInstallments(List.of())));
+
+        StepVerifier.create(service.findAll(null))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        org.mockito.Mockito.verify(creditRepository, org.mockito.Mockito.never())
+                .findByCustomerId(any());
+    }
+
+    @Test
+    void findAll_conCustomerId_filtraPorCliente() {
+        when(creditRepository.findByCustomerId("cust1"))
+                .thenReturn(reactor.core.publisher.Flux.just(activeCreditWithInstallments(List.of())));
+
+        StepVerifier.create(service.findAll("cust1"))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        org.mockito.Mockito.verify(creditRepository, org.mockito.Mockito.never()).findAll();
+    }
+
+    @Test
+    void findPayments_conRangoDeFechas_filtraPorIntervalo() {
+        Credit credit = activeCreditWithInstallments(List.of());
+        Payment payment = Payment.builder().id("pay1").creditId("cred1").installmentNumber(1)
+                .amount(new BigDecimal("100.00")).timestamp(Instant.now()).build();
+        Instant from = Instant.now().minusSeconds(3600);
+        Instant to = Instant.now();
+
+        when(creditRepository.findById("cred1")).thenReturn(Mono.just(credit));
+        when(paymentRepository.findByCreditIdAndTimestampBetween("cred1", from, to))
+                .thenReturn(reactor.core.publisher.Flux.just(payment));
+
+        StepVerifier.create(service.findPayments("cred1", from, to))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        org.mockito.Mockito.verify(paymentRepository, org.mockito.Mockito.never())
+                .findByCreditId(any());
+    }
 }
