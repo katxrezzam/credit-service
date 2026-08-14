@@ -13,34 +13,46 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.support.WebExchangeBindException;
 import org.springframework.web.server.ServerWebExchange;
 
+/** Traduce las excepciones de negocio y de infraestructura a {@link ErrorResponse} con el
+ * status HTTP correcto, agregando el correlation id de la request para trazabilidad. */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    /** Credito inexistente: 404. */
     @ExceptionHandler(CreditNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleCreditNotFound(CreditNotFoundException ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleCreditNotFound(
+            CreditNotFoundException ex, ServerWebExchange exchange) {
         return build(HttpStatus.NOT_FOUND, ex.getMessage(), exchange);
     }
 
+    /** Cliente inexistente en customer-service: 400 (dato de entrada invalido). */
     @ExceptionHandler(CustomerNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleCustomerNotFound(CustomerNotFoundException ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleCustomerNotFound(
+            CustomerNotFoundException ex, ServerWebExchange exchange) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage(), exchange);
     }
 
+    /** customer-service no disponible (circuito abierto/timeout/error tecnico): 503. */
     @ExceptionHandler(CustomerServiceUnavailableException.class)
-    public ResponseEntity<ErrorResponse> handleCustomerServiceUnavailable(CustomerServiceUnavailableException ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleCustomerServiceUnavailable(
+            CustomerServiceUnavailableException ex, ServerWebExchange exchange) {
         log.error("customer-service no disponible, correlationId={}", correlationId(exchange), ex);
         return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), exchange);
     }
 
+    /** Violacion de una regla de negocio (D8): 400. */
     @ExceptionHandler(InvalidBusinessRuleException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidRule(InvalidBusinessRuleException ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleInvalidRule(
+            InvalidBusinessRuleException ex, ServerWebExchange exchange) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage(), exchange);
     }
 
+    /** Errores de validacion de {@code @Valid} sobre el body: 400 con detalle por campo. */
     @ExceptionHandler(WebExchangeBindException.class)
-    public ResponseEntity<ErrorResponse> handleValidation(WebExchangeBindException ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleValidation(
+            WebExchangeBindException ex, ServerWebExchange exchange) {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .map(fieldError -> fieldError.getField() + ": " + fieldError.getDefaultMessage())
                 .collect(Collectors.joining("; "));
@@ -50,7 +62,8 @@ public class GlobalExceptionHandler {
     /** Ver CONVENTIONS.md: excepciones de Spring que ya traen su propio status (ej.
      * NoResourceFoundException) deben respetarlo, no caer siempre en el 500 generico de abajo. */
     @ExceptionHandler(ErrorResponseException.class)
-    public ResponseEntity<ErrorResponse> handleErrorResponseException(ErrorResponseException ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleErrorResponseException(
+            ErrorResponseException ex, ServerWebExchange exchange) {
         HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
         if (status == null) {
             status = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -58,13 +71,16 @@ public class GlobalExceptionHandler {
         return build(status, ex.getMessage(), exchange);
     }
 
+    /** Cualquier otra excepcion no anticipada: 500, con stacktrace en el log para diagnostico. */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, ServerWebExchange exchange) {
+    public ResponseEntity<ErrorResponse> handleUnexpected(
+            Exception ex, ServerWebExchange exchange) {
         log.error("Error no controlado, correlationId={}", correlationId(exchange), ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Ocurrio un error inesperado", exchange);
     }
 
-    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, ServerWebExchange exchange) {
+    private ResponseEntity<ErrorResponse> build(
+            HttpStatus status, String message, ServerWebExchange exchange) {
         ErrorResponse body = new ErrorResponse(
                 Instant.now(),
                 status.value(),

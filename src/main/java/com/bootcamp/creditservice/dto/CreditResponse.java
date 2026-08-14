@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
+/** DTO de salida de un credito. */
 public record CreditResponse(
         String id,
         String customerId,

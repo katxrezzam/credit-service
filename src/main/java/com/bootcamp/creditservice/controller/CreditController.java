@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+/** Endpoints REST de creditos: CRUD y pagos de cuotas. */
 @RestController
 @RequestMapping("/credits")
 public class CreditController {
@@ -48,7 +49,8 @@ public class CreditController {
     }
 
     @PutMapping("/{id}")
-    public Mono<CreditResponse> update(@PathVariable String id, @Valid @RequestBody CreditUpdateRequest request) {
+    public Mono<CreditResponse> update(
+            @PathVariable String id, @Valid @RequestBody CreditUpdateRequest request) {
         return creditService.update(id, request);
     }
 

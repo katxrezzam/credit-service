@@ -4,11 +4,13 @@ import com.bootcamp.creditservice.model.Credit;
 import com.bootcamp.creditservice.model.Installment;
 import java.util.List;
 
+/** Mapeo manual entidad Credit -&gt; DTO de salida. */
 public final class CreditMapper {
 
     private CreditMapper() {
     }
 
+    /** Convierte la entidad al DTO de salida, incluidas sus cuotas. */
     public static CreditResponse toResponse(Credit credit) {
         List<InstallmentResponse> installments = credit.getInstallments() == null
                 ? List.of()

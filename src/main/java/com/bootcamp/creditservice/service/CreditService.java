@@ -8,6 +8,7 @@ import com.bootcamp.creditservice.dto.PaymentResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+/** Casos de uso de negocio sobre creditos: CRUD + pagos de cuotas. */
 public interface CreditService {
 
     Mono<CreditResponse> create(CreditRequest request);
