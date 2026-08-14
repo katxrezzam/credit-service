@@ -76,6 +76,17 @@ class CreditControllerTest {
     }
 
     @Test
+    void hasOverdueDebt_true_retorna200ConTrue() {
+        when(creditService.hasOverdueDebt("cust1")).thenReturn(Mono.just(true));
+
+        webTestClient.get().uri("/credits/customers/{customerId}/has-overdue-debt", "cust1")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(Boolean.class)
+                .isEqualTo(true);
+    }
+
+    @Test
     void rutaInexistente_retorna404NoQuinientos() {
         // El bug que encontramos con Newman: una URL que no matchea ningun endpoint debe dar 404
         // real, no 500 generico (fix en GlobalExceptionHandler via ErrorResponseException).

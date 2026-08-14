@@ -79,4 +79,11 @@ public class CreditController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         return creditService.pay(id, request, idempotencyKey);
     }
+
+    /** Consumido por account-service y card-service antes de dar de alta un producto nuevo
+     * (D8, Fase III). Siempre responde true/false, no tiene un "404 de negocio". */
+    @GetMapping("/customers/{customerId}/has-overdue-debt")
+    public Mono<Boolean> hasOverdueDebt(@PathVariable String customerId) {
+        return creditService.hasOverdueDebt(customerId);
+    }
 }

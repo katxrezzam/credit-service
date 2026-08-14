@@ -1,5 +1,6 @@
 package com.bootcamp.creditservice.service;
 
+import com.bootcamp.creditservice.client.AccountClient;
 import com.bootcamp.creditservice.client.CustomerClient;
 import com.bootcamp.creditservice.dto.CreditMapper;
 import com.bootcamp.creditservice.dto.CreditRequest;
@@ -15,7 +16,9 @@ import com.bootcamp.creditservice.model.CreditStatus;
 import com.bootcamp.creditservice.model.CustomerType;
 import com.bootcamp.creditservice.model.Installment;
 import com.bootcamp.creditservice.model.Payment;
+import com.bootcamp.creditservice.model.PaymentCompensation;
 import com.bootcamp.creditservice.repository.CreditRepository;
+import com.bootcamp.creditservice.repository.PaymentCompensationRepository;
 import com.bootcamp.creditservice.repository.PaymentRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -48,20 +51,26 @@ public class CreditServiceImpl implements CreditService {
 
     private final CreditRepository creditRepository;
     private final PaymentRepository paymentRepository;
+    private final PaymentCompensationRepository paymentCompensationRepository;
     private final ReactiveMongoTemplate mongoTemplate;
     private final CustomerClient customerClient;
+    private final AccountClient accountClient;
 
-    /** Inyecta repositorios, la plantilla Mongo para updates atomicos y el cliente
-     * de customer-service. */
+    /** Inyecta repositorios, la plantilla Mongo para updates atomicos y los clientes
+     * de customer-service y account-service. */
     public CreditServiceImpl(
             CreditRepository creditRepository,
             PaymentRepository paymentRepository,
+            PaymentCompensationRepository paymentCompensationRepository,
             ReactiveMongoTemplate mongoTemplate,
-            CustomerClient customerClient) {
+            CustomerClient customerClient,
+            AccountClient accountClient) {
         this.creditRepository = creditRepository;
         this.paymentRepository = paymentRepository;
+        this.paymentCompensationRepository = paymentCompensationRepository;
         this.mongoTemplate = mongoTemplate;
         this.customerClient = customerClient;
+        this.accountClient = accountClient;
     }
 
     @Override
@@ -69,10 +78,20 @@ public class CreditServiceImpl implements CreditService {
         return customerClient.getCustomer(request.customerId())
                 .flatMap(customerInfo -> validateOnePersonalCreditActive(
                         request.customerId(), customerInfo.customerType()))
+                .then(Mono.defer(() -> validateNoOverdueDebt(request.customerId())))
                 .then(Mono.defer(() -> creditRepository.save(buildNewCredit(request))))
                 .doOnNext(saved -> log.info(
                         "Credito creado id={} customerId={}", saved.getId(), saved.getCustomerId()))
                 .map(CreditMapper::toResponse);
+    }
+
+    @Override
+    public Mono<Boolean> hasOverdueDebt(String customerId) {
+        LocalDate today = LocalDate.now();
+        return creditRepository.findByCustomerId(customerId)
+                .any(credit -> credit.getInstallments().stream()
+                        .anyMatch(installment -> !installment.isPaid()
+                                && installment.getDueDate().isBefore(today)));
     }
 
     @Override
@@ -147,20 +166,96 @@ public class CreditServiceImpl implements CreditService {
         }
         return paymentRepository.findByIdempotencyKey(idempotencyKey)
                 .map(PaymentMapper::toResponse)
-                .switchIfEmpty(Mono.defer(() -> executePayment(creditId, request, idempotencyKey)));
+                .switchIfEmpty(Mono.defer(
+                        () -> executePaymentOrRejectReplay(creditId, request, idempotencyKey)));
     }
 
+    /**
+     * Si esta Idempotency-Key ya se intento y termino compensada, rechaza el reintento con un
+     * error explicito en vez de dejarlo pasar: account-service es idempotente por clave y
+     * devolveria el retiro ya cacheado SIN volver a debitar, pero el pago local si se aplicaria
+     * de nuevo - un pago "gratis", sin plata detras. Mismo espiritu que el "reintentar con clave
+     * nueva" ya documentado para transferencias (D6/D7), resuelto aqui con
+     * {@link PaymentCompensation} en vez de una consulta remota a account-service.
+     */
+    private Mono<PaymentResponse> executePaymentOrRejectReplay(
+            String creditId, PaymentRequest request, String idempotencyKey) {
+        return paymentCompensationRepository.findByIdempotencyKey(idempotencyKey)
+                .flatMap(existing -> Mono.<PaymentResponse>error(new InvalidBusinessRuleException(
+                        "Este pago ya se intento con esta Idempotency-Key y no se pudo completar "
+                                + "(se revirtio el debito) - reintente con una clave nueva")))
+                .switchIfEmpty(Mono.defer(
+                        () -> executePayment(creditId, request, idempotencyKey)));
+    }
+
+    /**
+     * Orden: valida la cuota/monto localmente primero (barato) -> debita la cuenta origen
+     * (remoto, mueve plata real) -> aplica el pago local. Si el paso local falla despues de
+     * haber debitado, compensa revirtiendo el debito (Saga local con compensacion cross-servicio
+     * - D6/D7, mismo criterio que las transferencias en account-service).
+     */
     private Mono<PaymentResponse> executePayment(
             String creditId, PaymentRequest request, String idempotencyKey) {
         return findEntityById(creditId)
                 .flatMap(credit -> validateAndFindTargetInstallment(credit, request.amount()))
-                .flatMap(targetNumber -> applyInstallmentPayment(creditId, targetNumber)
-                        .flatMap(this::markCreditPaidIfComplete)
-                        .flatMap(updatedCredit -> recordPayment(
-                                updatedCredit, targetNumber, request.amount(), idempotencyKey)))
+                .flatMap(targetNumber -> debitSourceAccount(request, idempotencyKey)
+                        .then(Mono.defer(() -> applyInstallmentPayment(creditId, targetNumber)
+                                .flatMap(this::markCreditPaidIfComplete)
+                                .flatMap(updatedCredit -> recordPayment(updatedCredit,
+                                        targetNumber, request.amount(), idempotencyKey))
+                                .onErrorResume(ex -> compensateDebit(creditId, targetNumber,
+                                        request, idempotencyKey, ex)))))
                 .doOnNext(payment -> log.info("Pago registrado creditId={} cuota={}",
                         creditId, payment.getInstallmentNumber()))
                 .map(PaymentMapper::toResponse);
+    }
+
+    private Mono<Void> debitSourceAccount(PaymentRequest request, String idempotencyKey) {
+        return accountClient.withdraw(
+                request.sourceAccountId(), request.amount(), idempotencyKey + ":withdrawal");
+    }
+
+    /**
+     * El pago no se pudo aplicar localmente despues de haber debitado: revierte el debito con un
+     * deposito compensatorio y deja constancia en {@link PaymentCompensation} para poder
+     * rechazar un reintento con la misma clave (ver {@link #executePaymentOrRejectReplay}).
+     * Si la propia compensacion fallara, es el unico caso real de inconsistencia posible: se
+     * loguea como fallo critico para revision manual, pero igual se propaga el error original.
+     */
+    private Mono<Payment> compensateDebit(
+            String creditId, int installmentNumber, PaymentRequest request,
+            String idempotencyKey, Throwable cause) {
+        log.error("Pago fallo tras debitar la cuenta {} - compensando el debito. "
+                + "idempotencyKey={}", request.sourceAccountId(), idempotencyKey, cause);
+        Mono<Void> compensation = accountClient
+                .deposit(request.sourceAccountId(), request.amount(),
+                        idempotencyKey + ":compensation")
+                .doOnSuccess(v -> log.warn(
+                        "Compensacion aplicada: se revirtio el debito de {} en la cuenta {}",
+                        request.amount(), request.sourceAccountId()))
+                .then(Mono.defer(() -> recordCompensation(
+                        creditId, installmentNumber, request.amount(), idempotencyKey)))
+                .onErrorResume(compensationFailure -> {
+                    log.error("FALLO CRITICO: no se pudo compensar el pago de la cuenta {} "
+                            + "(idempotencyKey={}) - queda con el debito aplicado sin revertir, "
+                            + "requiere revision manual", request.sourceAccountId(),
+                            idempotencyKey, compensationFailure);
+                    return Mono.empty();
+                })
+                .then();
+        return compensation.then(Mono.<Payment>error(cause));
+    }
+
+    private Mono<PaymentCompensation> recordCompensation(
+            String creditId, int installmentNumber, BigDecimal amount, String idempotencyKey) {
+        PaymentCompensation record = PaymentCompensation.builder()
+                .creditId(creditId)
+                .installmentNumber(installmentNumber)
+                .amount(amount)
+                .timestamp(Instant.now())
+                .idempotencyKey(idempotencyKey)
+                .build();
+        return paymentCompensationRepository.save(record);
     }
 
     private Mono<Credit> findEntityById(String id) {
@@ -177,6 +272,17 @@ public class CreditServiceImpl implements CreditService {
                 .flatMap(exists -> exists
                         ? Mono.<Void>error(new InvalidBusinessRuleException(
                                 "El cliente ya tiene un credito activo (personal: uno por vez)"))
+                        : Mono.empty());
+    }
+
+    /** Bloquea la adquisicion de un credito nuevo si el cliente ya tiene deuda vencida en
+     * cualquier otro credito (D8, Fase III: "no podra adquirir un producto"). */
+    private Mono<Void> validateNoOverdueDebt(String customerId) {
+        return hasOverdueDebt(customerId)
+                .flatMap(overdue -> overdue
+                        ? Mono.<Void>error(new InvalidBusinessRuleException(
+                                "El cliente tiene una deuda vencida y no puede adquirir "
+                                        + "productos nuevos"))
                         : Mono.empty());
     }
 

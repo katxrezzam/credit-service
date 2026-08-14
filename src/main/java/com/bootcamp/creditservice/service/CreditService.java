@@ -29,4 +29,10 @@ public interface CreditService {
     Flux<PaymentResponse> findPayments(String creditId, Instant from, Instant to);
 
     Mono<PaymentResponse> pay(String creditId, PaymentRequest request, String idempotencyKey);
+
+    /** true si el cliente tiene alguna cuota vencida (dueDate pasado, sin pagar) en cualquiera
+     * de sus creditos, sin periodo de gracia (D8, Fase III). Lo consumen account-service y
+     * card-service antes de dar de alta un producto nuevo, y create() de este mismo servicio
+     * antes de otorgar un credito nuevo. */
+    Mono<Boolean> hasOverdueDebt(String customerId);
 }

@@ -42,6 +42,23 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), exchange);
     }
 
+    /** account-service no disponible (circuito abierto/timeout/error tecnico) al debitar/
+     * compensar la cuenta origen de un pago: 503. */
+    @ExceptionHandler(AccountServiceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleAccountServiceUnavailable(
+            AccountServiceUnavailableException ex, ServerWebExchange exchange) {
+        log.error("account-service no disponible, correlationId={}", correlationId(exchange), ex);
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), exchange);
+    }
+
+    /** account-service rechazo el debito/deposito con un error de negocio propio (fondos
+     * insuficientes, cuenta inexistente, etc): se respeta el status original. */
+    @ExceptionHandler(AccountDebitRejectedException.class)
+    public ResponseEntity<ErrorResponse> handleAccountDebitRejected(
+            AccountDebitRejectedException ex, ServerWebExchange exchange) {
+        return build(ex.getStatus(), ex.getMessage(), exchange);
+    }
+
     /** Violacion de una regla de negocio (D8): 400. */
     @ExceptionHandler(InvalidBusinessRuleException.class)
     public ResponseEntity<ErrorResponse> handleInvalidRule(
