@@ -1,0 +1,14 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: credit-service
+  mongodb:
+    uri: mongodb://localhost:27017/creditdb
+  data:
+    mongodb:
+      auto-index-creation: true
+
+customer-service:
+  base-url: http://localhost:8081
