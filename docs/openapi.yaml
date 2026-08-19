@@ -1,0 +1,285 @@
+openapi: 3.1.0
+info:
+  title: credit-service
+  description: "Creditos personal (uno por persona) y empresarial (varios): cuotas\
+    \ iguales autogeneradas, pagos idempotentes incluido pago de deuda de terceros."
+  version: v1
+servers:
+- url: http://localhost:8083
+  description: Generated server url
+paths:
+  /credits/{id}:
+    get:
+      tags:
+      - credit-controller
+      operationId: findById
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CreditResponse"
+    put:
+      tags:
+      - credit-controller
+      operationId: update
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditUpdateRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CreditResponse"
+    delete:
+      tags:
+      - credit-controller
+      operationId: delete
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+  /credits:
+    get:
+      tags:
+      - credit-controller
+      operationId: findAll
+      parameters:
+      - name: customerId
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CreditResponse"
+    post:
+      tags:
+      - credit-controller
+      operationId: create
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CreditResponse"
+  /credits/{id}/payments:
+    get:
+      tags:
+      - credit-controller
+      operationId: findPayments
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentResponse"
+    post:
+      tags:
+      - credit-controller
+      operationId: pay
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+  /credits/customers/{customerId}/has-overdue-debt:
+    get:
+      tags:
+      - credit-controller
+      operationId: hasOverdueDebt
+      parameters:
+      - name: customerId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: boolean
+components:
+  schemas:
+    CreditUpdateRequest:
+      type: object
+      properties:
+        totalAmount:
+          type: number
+          minimum: 0.0
+        termMonths:
+          type: integer
+          format: int32
+          maximum: 360
+          minimum: 1
+      required:
+      - termMonths
+      - totalAmount
+    CreditResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        totalAmount:
+          type: number
+        termMonths:
+          type: integer
+          format: int32
+        installmentAmount:
+          type: number
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - PAID
+        installments:
+          type: array
+          items:
+            $ref: "#/components/schemas/InstallmentResponse"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    InstallmentResponse:
+      type: object
+      properties:
+        number:
+          type: integer
+          format: int32
+        amount:
+          type: number
+        dueDate:
+          type: string
+          format: date
+        paid:
+          type: boolean
+        paidAt:
+          type: string
+          format: date-time
+    CreditRequest:
+      type: object
+      properties:
+        customerId:
+          type: string
+          minLength: 1
+        totalAmount:
+          type: number
+          minimum: 0.0
+        termMonths:
+          type: integer
+          format: int32
+          maximum: 360
+          minimum: 1
+      required:
+      - customerId
+      - termMonths
+      - totalAmount
+    PaymentRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+          minimum: 0.0
+        sourceAccountId:
+          type: string
+          minLength: 1
+      required:
+      - amount
+      - sourceAccountId
+    PaymentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        creditId:
+          type: string
+        installmentNumber:
+          type: integer
+          format: int32
+        amount:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
